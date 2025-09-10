@@ -1,0 +1,22 @@
+[package]
+name = "bevy_editor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.99"
+bevy = "0.16.1"
+crossbeam = "0.8.4"
+eframe = "0.32.2"
+egui = "0.32.2"
+notify = "8.2.0"
+rfd = "0.15.4"
+ron = "0.11.0"
+serde = { version = "1.0.219", features = ["derive"]}
+serde_json = "1.0.143"
+thiserror = "2.0.16"
+tokio = "1.47.1"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.20"
+uuid = "1.18.1"
+wgpu = "26.0.1"
