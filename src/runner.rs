@@ -14,6 +14,8 @@ pub fn start(root: PathBuf, env_overrides: &[(&str, &str)]) -> Receiver<RunnerMs
 
     let mut cmd = Command::new("cargo");
     cmd.arg("run")
+        .arg("--bin")
+        .arg("sample_game")
         .arg("--features")
         .arg("editor-bridge")
         .current_dir(&root)

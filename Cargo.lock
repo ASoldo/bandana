@@ -610,6 +610,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "bandana"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bevy",
+ "crossbeam",
+ "eframe",
+ "egui",
+ "notify",
+ "rfd",
+ "ron 0.11.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.16",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "wgpu 26.0.1",
+]
+
+[[package]]
 name = "base64"
 version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -883,28 +905,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "bevy_editor"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bevy",
- "crossbeam",
- "eframe",
- "egui",
- "notify",
- "rfd",
- "ron 0.11.0",
- "serde",
- "serde_json",
- "thiserror 2.0.16",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "wgpu 26.0.1",
 ]
 
 [[package]]

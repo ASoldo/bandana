@@ -6,10 +6,42 @@ use crossbeam::channel::{Receiver, Sender, unbounded};
 use eframe::egui;
 use eframe::egui::{ComboBox, DragValue, Rgba};
 use egui::color_picker::Alpha;
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct Schema {
+    scripts: Vec<ScriptMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ScriptMeta {
+    name: String,
+    rust_symbol: String,
+    params: Vec<ParamMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ParamMeta {
+    key: String,
+    label: String,
+    ty: ParamType,
+    default: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+enum ParamType {
+    Bool,
+    I64,
+    F64,
+    String,
+    Vec3,
+    ColorRgba,
+}
 
 pub struct EditorApp {
     project: Option<ProjectState>,
@@ -31,6 +63,9 @@ pub struct EditorApp {
     // --- viewport (2D top-down preview) ---
     view_offset: egui::Vec2, // world-space pan (in "meters")
     view_zoom: f32,          // screen pixels per world unit
+    //
+    script_schema: Option<Schema>,
+    schema_mtime: Option<std::time::SystemTime>,
 }
 
 impl EditorApp {
@@ -53,7 +88,35 @@ impl EditorApp {
 
             view_offset: egui::vec2(0.0, 0.0),
             view_zoom: 40.0,
+            script_schema: None,
+            schema_mtime: None,
         }
+    }
+
+    fn load_script_schema_from(&mut self, root: &std::path::Path) {
+        use std::fs;
+
+        let path = root.join("design/.schema.ron");
+        match fs::read_to_string(&path) {
+            Ok(txt) => match ron::from_str::<Schema>(&txt) {
+                Ok(schema) => {
+                    self.schema_mtime = fs::metadata(&path).ok().and_then(|m| m.modified().ok());
+                    let count = schema.scripts.len();
+                    self.script_schema = Some(schema);
+                    self.last_log = format!("Loaded script schema ({} scripts).", count);
+                }
+                Err(e) => {
+                    self.script_schema = None;
+                    self.last_log = format!("Failed to parse .schema.ron: {e}");
+                }
+            },
+            Err(e) => {
+                self.script_schema = None;
+                self.last_log = format!("No .schema.ron yet (run exporter): {e}");
+            }
+        }
+
+        self.egui_ctx.request_repaint();
     }
 
     // button to open/ensure preview (reserved for future Bevy offscreen):
@@ -88,7 +151,12 @@ impl EditorApp {
                     }
                 });
 
+                // Set the project
                 self.project = Some(proj);
+
+                // ⬅️ Borrow ends; now take a plain PathBuf and call the &mut self method.
+                let root_for_schema = self.project.as_ref().unwrap().root.clone();
+                self.load_script_schema_from(&root_for_schema);
             }
             Err(e) => {
                 self.last_log = format!("Failed to open project: {e:?}");
@@ -235,7 +303,22 @@ impl EditorApp {
 impl eframe::App for EditorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(p) = &mut self.project {
-            p.reload_design_if_changed(); // hot-reload design file if it changed on disk
+            // Hot-reload scene file if changed
+            p.reload_design_if_changed();
+
+            // Hot-reload .schema.ron if changed
+            use std::fs;
+            let root = p.root.clone(); // take a copy while we have &mut p
+            if let Ok(mt) = fs::metadata(root.join("design/.schema.ron")).and_then(|m| m.modified())
+            {
+                let changed = match self.schema_mtime {
+                    None => true,
+                    Some(old) => mt > old,
+                };
+                if changed {
+                    self.load_script_schema_from(&root);
+                }
+            }
         }
 
         // drain build results
@@ -347,6 +430,21 @@ impl eframe::App for EditorApp {
                             ));
                         }
                     });
+
+                    ui.separator();
+                    ui.collapsing("Scripts (schema)", |ui| {
+                        match &self.script_schema {
+                            Some(s) if !s.scripts.is_empty() => {
+                                for sm in &s.scripts {
+                                    ui.label(format!("• {}  ({})", sm.name, sm.rust_symbol));
+                                }
+                            }
+                            _ => {
+                                ui.small("No scripts available. Build the game with `--features bandana_export` and run the exporter bin to create design/.schema.ron");
+                            }
+                        }
+                    });
+
                 } else {
                     ui.label("Open a project to inspect.");
                 }

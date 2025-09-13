@@ -1,5 +1,5 @@
 [package]
-name = "bevy_editor"
+name = "bandana"
 version = "0.1.0"
 edition = "2024"
 
