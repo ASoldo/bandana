@@ -9,7 +9,6 @@ use eframe::egui;
 use eframe::egui::{ComboBox, DragValue, Rgba};
 use egui::color_picker::Alpha;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -118,6 +117,13 @@ impl EditorApp {
                             }
                         });
 
+                    // Persist the current selection every frame so the dropdown reflects it.
+                    unsafe {
+                        // Clamp to valid range in case the schema changed between frames
+                        let max = names.len().saturating_sub(1);
+                        PICK = pick.min(max);
+                    }
+
                     if ui.button("Add").clicked() {
                         if let Some(sel) = names.get(pick) {
                             let already = scripts_vec.iter().any(|a| a.name == *sel);
@@ -127,9 +133,6 @@ impl EditorApp {
                                     params: Default::default(),
                                 });
                             }
-                        }
-                        unsafe {
-                            PICK = pick;
                         }
                     }
                 });
