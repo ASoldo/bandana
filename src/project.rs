@@ -13,6 +13,15 @@ pub struct SceneDoc {
 pub struct EntityDoc {
     pub id: String,
     pub components: Vec<ComponentDoc>,
+    #[serde(default)]
+    pub scripts: Vec<AttachedScript>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AttachedScript {
+    pub name: String,
+    #[serde(default)]
+    pub params: std::collections::BTreeMap<String, ron::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

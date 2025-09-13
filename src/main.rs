@@ -1,5 +1,6 @@
 mod app;
 mod build;
+mod build_meta;
 mod fs_watcher;
 mod preview;
 mod project;

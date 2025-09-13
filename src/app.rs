@@ -1,7 +1,9 @@
+use crate::build_meta;
+
 use crate::build::{BuildJob, BuildResult, BuildWorker};
 use crate::fs_watcher::WatchWorker;
 use crate::preview::PreviewHandle;
-use crate::project::{CompData, ProjectState, SceneDoc};
+use crate::project::{AttachedScript, CompData, ProjectState, SceneDoc};
 use crossbeam::channel::{Receiver, Sender, unbounded};
 use eframe::egui;
 use eframe::egui::{ComboBox, DragValue, Rgba};
@@ -91,6 +93,72 @@ impl EditorApp {
             script_schema: None,
             schema_mtime: None,
         }
+    }
+    fn draw_scripts_section(
+        ui: &mut egui::Ui,
+        ent: &mut crate::project::EntityDoc,
+        schema: Option<&Schema>,
+    ) {
+        ui.separator();
+        ui.collapsing("Scripts", |ui| {
+            let scripts_vec = &mut ent.scripts;
+
+            if let Some(schema) = schema {
+                ui.horizontal(|ui| {
+                    static mut PICK: usize = 0;
+                    let mut pick = unsafe { PICK };
+
+                    let names: Vec<&str> = schema.scripts.iter().map(|s| s.name.as_str()).collect();
+
+                    egui::ComboBox::from_label("Add script")
+                        .selected_text(names.get(pick).copied().unwrap_or("<select>"))
+                        .show_ui(ui, |ui| {
+                            for (i, n) in names.iter().enumerate() {
+                                ui.selectable_value(&mut pick, i, *n);
+                            }
+                        });
+
+                    if ui.button("Add").clicked() {
+                        if let Some(sel) = names.get(pick) {
+                            let already = scripts_vec.iter().any(|a| a.name == *sel);
+                            if !already {
+                                scripts_vec.push(AttachedScript {
+                                    name: (*sel).to_string(),
+                                    params: Default::default(),
+                                });
+                            }
+                        }
+                        unsafe {
+                            PICK = pick;
+                        }
+                    }
+                });
+            } else {
+                ui.small("No schema loaded yet.");
+            }
+
+            ui.separator();
+
+            // current attachments
+            let mut to_remove: Option<usize> = None;
+            for (i, a) in scripts_vec.iter_mut().enumerate() {
+                ui.group(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("• {}", a.name));
+                        if ui.button("Remove").clicked() {
+                            to_remove = Some(i);
+                        }
+                    });
+
+                    // Params UI can be added next iteration using schema lookup.
+                    ui.small("Params UI TBD.");
+                });
+                ui.add_space(4.0);
+            }
+            if let Some(i) = to_remove {
+                scripts_vec.remove(i);
+            }
+        });
     }
 
     fn load_script_schema_from(&mut self, root: &std::path::Path) {
@@ -379,33 +447,48 @@ impl eframe::App for EditorApp {
                 ui.heading("Inspector");
 
                 if let Some(p) = &mut self.project {
+                    
                     if let (Some(scene), Some(sel)) = (&mut p.design_scene, self.selected_entity) {
-                        if let Some(ent) = scene.entities.get_mut(sel) {
+                        let mut want_save = false;
+
+                        {
+                            // ── begin short borrow of the selected entity
+                            let ent = scene
+                                .entities
+                                .get_mut(sel)
+                                .expect("selected index valid while drawing");
+
                             ui.monospace(format!("Entity: {}", ent.id));
                             ui.separator();
 
                             for comp in &mut ent.components {
                                 ui.collapsing(&comp.type_id, |ui| match comp.type_id.as_str() {
-                                    "Transform" => draw_transform(ui, &mut comp.data),
-                                    "Mesh3d" => draw_mesh3d(ui, &mut comp.data),
+                                    "Transform"  => draw_transform(ui, &mut comp.data),
+                                    "Mesh3d"     => draw_mesh3d(ui, &mut comp.data),
                                     "Material3d" => draw_material3d(ui, &mut comp.data),
                                     "PointLight" => draw_point_light(ui, &mut comp.data),
-                                    "Camera3d" => {
-                                        ui.label("No editable fields");
-                                    }
-                                    _ => {
-                                        ui.label("Unsupported component");
-                                    }
+                                    "Camera3d"   => { ui.label("No editable fields"); }
+                                    _            => { ui.label("Unsupported component"); }
                                 });
                             }
 
                             ui.separator();
+                            // just set a flag; do NOT call save while `ent` is borrowed
                             if ui.button("Save scene").clicked() {
-                                match p.save_design() {
-                                    Ok(_) => self.last_log = "scene saved".into(),
-                                    Err(e) => self.last_log = format!("save failed: {e:#}"),
-                                }
+                                want_save = true;
                             }
+
+                            // scripts UI also needs &mut ent, so keep it inside this scope
+                            Self::draw_scripts_section(ui, ent, self.script_schema.as_ref());
+                        } // ── entity borrow ends here
+
+                        // Now it's safe to call methods that borrow `p` mutably.
+                        if want_save {
+                            match p.save_design() {
+                                Ok(_)  => self.last_log = "scene saved".into(),
+                                Err(e) => self.last_log = format!("save failed: {e:#}"),
+                            }
+                            self.egui_ctx.request_repaint();
                         }
                     }
 
@@ -444,6 +527,54 @@ impl eframe::App for EditorApp {
                             }
                         }
                     });
+
+                   // Stage the root we want to export from
+                    let mut want_export: Option<std::path::PathBuf> = None;
+
+                    if ui.button("Export meta").clicked() {
+                        if let Some(p) = &self.project {
+                            want_export = Some(p.root.clone());
+                        }
+                    }
+
+                    // Run export after the borrow of `p` has ended
+                    if let Some(root) = want_export {
+                        match build_meta::export_schema(&root, &[]) {
+                            Ok(res) => {
+                                // show logs in your console
+                                if !res.stdout.is_empty() {
+                                    for line in res.stdout.lines() {
+                                        self.run_log.push(format!("[export/stdout] {line}"));
+                                    }
+                                }
+                                if !res.stderr.is_empty() {
+                                    for line in res.stderr.lines() {
+                                        self.run_log.push(format!("[export/stderr] {line}"));
+                                    }
+                                }
+
+                                // keep console bounded like elsewhere
+                                if self.run_log.len() > 5000 {
+                                    let drain = self.run_log.len() - 5000;
+                                    self.run_log.drain(0..drain);
+                                }
+
+                                if res.success() {
+                                    self.last_log = "Exported script schema.".into();
+                                    // hot-reload the schema file into the editor
+                                    self.load_script_schema_from(&root);
+                                } else {
+                                    self.last_log =
+                                        format!("Export failed (exit {}). See console.", res.status);
+                                }
+                            }
+                            Err(e) => {
+                                self.last_log = format!("Failed to run exporter: {e}");
+                            }
+                        }
+                        self.egui_ctx.request_repaint();
+                    }
+
 
                 } else {
                     ui.label("Open a project to inspect.");
